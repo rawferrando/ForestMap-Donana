@@ -1,0 +1,38 @@
+# ForestMap Doñana V3
+
+Inventario forestal individual con LiDAR para el sabinar de Doñana (*Juniperus phoenicea* subsp. *turbinata*).
+
+## Instalación (Ubuntu)
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## Flujo (7 pasos)
+1. Configuración (épocas, EPSG) · 2. Carga LAS/LAZ + parcela (`parcela.gpkg`) · 3. DEM/DSM/CHM + perfil vertical ·
+4. Antena, vallado y sensores (tabla editable) · 5. Árboles, capas de altura (0,5 m), volúmenes, auditoría de ≥ 8 m ·
+6. Cambios entre épocas (ΔH, mortalidad/reclutamiento) · 7. Informe HTML + paquete QGIS (ZIP).
+
+## Módulos
+`procesado` (DEM/DSM/CHM) · `copas` (ápices, copas, capas, volúmenes) · `vectores` (ráster→polígono exacto) ·
+`estructuras` (antena/vallado/instrumentos) · `roi` · `pipeline` · `figuras` (informe) · `graficos` (Plotly) ·
+`informe` · `exportar` · `sintetico` (escena de prueba) · `pruebas/`.
+
+## Pruebas
+`bash ejecutar_pruebas.sh` (con datos sintéticos) y `python pruebas/stub_streamlit.py` (humo de la interfaz sin Streamlit).
+
+## Novedades V3.1 (datos reales del Ojillo)
+- Lector LAS propio (funciona sin laspy con .las sin comprimir; para .laz: `pip install 'laspy[lazrs]'`) y uso opcional de la clase 2 del archivo.
+- Parcela desde `parcela.gpkg` sin geopandas (sqlite3). Por debajo de 1,3 m = suelo. Pino = ápice > 5 m, un pino = un individuo.
+- Antena con brazos/sensores; lo dudoso (confianza baja) no se excluye.
+- Dos épocas: emparejamiento de ápices a ≤ 1,2 m (protocolo ICTS) o copas solapadas → persisten / crecieron / estables / perdieron altura / mortalidad probable / nuevos, por especie.
+- Validación con inventario de campo (xlsx): estima el desplazamiento y cuenta fichas emparejadas y tapadas.
+- Informe con algoritmos, vistas 3D de la nube y comparación con campo.
+
+## Notas
+- Sin límite superior de altura: los individuos ≥ umbral (8 m) se marcan para auditoría, no se descartan.
+- La antena y estructuras se excluyen del recuento; revise la tabla del paso 4.
+- Con copas muy solapadas el CHM no permite separar individuos: el recuento es cota inferior.
+- Sin `rasterio`, los ráster se exportan como `.asc` + `.prj`; sin `geopandas`, solo GeoJSON.
+- `Informe_ForestMap.html` se imprime a PDF desde el navegador.

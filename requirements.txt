@@ -1,0 +1,13 @@
+streamlit>=1.35
+plotly>=5.20
+pandas
+numpy
+scipy
+scikit-image
+matplotlib
+laspy[lazrs]
+cloth-simulation-filter
+geopandas
+shapely
+rasterio
+openpyxl
