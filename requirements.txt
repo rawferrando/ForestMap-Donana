@@ -6,7 +6,6 @@ scipy
 scikit-image
 matplotlib
 laspy[lazrs]
-cloth-simulation-filter
 geopandas
 shapely
 rasterio

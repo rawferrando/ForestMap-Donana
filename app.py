@@ -287,7 +287,14 @@ elif paso == PASOS[2]:
         x1 = c3.number_input("X fin", value=float(b[1]), help="Coordenada X del final del corte."); y1 = c4.number_input("Y fin", value=float((b[2] + b[3]) / 2), help="Coordenada Y del final del corte.")
         w = c5.number_input("Ancho banda (m)", 0.5, 20.0, 3.0, help="Grosor de la rebanada: se dibujan los puntos a este ancho a cada lado de la línea. Más ancho = más puntos pero más mezclados.")
         d = S.datos[et]
-        figura_png(fg.perfil_vertical(d['xyz'], ep['hag'], d['suelo'], (x0, y0), (x1, y1), w, S.estr.get(et)))
+        hay_arb = et in S.arb
+        modo_txt = st.radio("🎨 Colorear por", ["Suelo / vegetación", "Cada individuo", "Especie"], horizontal=True,
+                            help="«Cada individuo» pinta cada árbol detectado con su color y su número (el mismo de la tabla del paso 5). «Especie» distingue sabina y pino. Necesita haber hecho antes el paso 5 (Árboles y capas) de esta época.")
+        if modo_txt != "Suelo / vegetación" and not hay_arb:
+            st.info("🌲 Para ver los individuos hay que ejecutar antes el paso 5 · Árboles y capas con esta época. Mientras tanto se muestra el perfil normal.")
+        modo = {"Suelo / vegetación": "tipo", "Cada individuo": "individuo", "Especie": "especie"}[modo_txt]
+        figura_png(fg.perfil_vertical(d['xyz'], ep['hag'], d['suelo'], (x0, y0), (x1, y1), w, S.estr.get(et),
+                                      arb=S.arb.get(et), modelos=mod, modo=modo if hay_arb else "tipo"))
 
 # ===================================================================== 4
 elif paso == PASOS[3]:

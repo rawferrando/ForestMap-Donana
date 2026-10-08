@@ -5,9 +5,15 @@ Inventario forestal individual con LiDAR para el sabinar de Doñana (*Juniperus 
 ## Instalación (Ubuntu)
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-local.txt   # incluye CSF (clasificación de suelo)
 streamlit run app.py
 ```
+En Windows: `py -m venv .venv`, `.venv\Scripts\activate`, y el mismo `pip install` y `streamlit run app.py`.
+
+## Versión web (Streamlit Community Cloud)
+`requirements.txt` no incluye CSF para que la instalación en la nube no falle; en ese caso la app usa
+automáticamente el clasificador de suelo morfológico. Para la demo online use recortes pequeños de nube (la RAM es limitada).
+Variable opcional `FORESTMAP_DEMO=1` (en *Secrets*: `FORESTMAP_DEMO = "1"`) muestra el botón de escena sintética.
 
 ## Flujo (7 pasos)
 1. Configuración (épocas, EPSG) · 2. Carga LAS/LAZ + parcela (`parcela.gpkg`) · 3. DEM/DSM/CHM + perfil vertical ·

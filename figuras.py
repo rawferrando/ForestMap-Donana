@@ -236,7 +236,7 @@ def clases_altura(g):
 
 
 # ---------------------------------------------------------------- infraestructura
-COLOR_TIPO = {"Antena": "#b0008f", "Vallado": "#e67e22", "Poste": "#2980b9", "Instrumento": "#16a085"}
+COLOR_TIPO = {"Antena": "#0055ff", "Vallado": "#e67e22", "Sensor": "#c0392b", "Poste": "#2980b9", "Instrumento": "#16a085"}
 
 
 def _color_tipo(t):
@@ -244,6 +244,14 @@ def _color_tipo(t):
         if t.startswith(k):
             return v
     return "#7f8c8d"
+
+
+def _rect_girado(cx, cy, lado, giro_grados):
+    a = np.radians(giro_grados)
+    h = lado / 2
+    esq = np.array([[-h, -h], [h, -h], [h, h], [-h, h], [-h, -h]])
+    R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+    return esq @ R.T + [cx, cy]
 
 
 def plano_estructuras(xyz, hag, suelo, est, radio=22.0, titulo="Infraestructura detectada"):
@@ -262,15 +270,21 @@ def plano_estructuras(xyz, hag, suelo, est, radio=22.0, titulo="Infraestructura 
     sc = ax.scatter(p[o, 0], p[o, 1], c=h[o], s=0.6, cmap="YlGn", vmin=0, vmax=max(6, np.percentile(h, 99)), zorder=1)
     for _, f in t.iterrows():
         pts = est.huellas.get(int(f['id']))
-        if pts is not None:
+        g = getattr(est, "geom", {}).get(int(f['id']))
+        if g is not None and g.get("tipo") == "rect":          # recinto: contorno discontinuo, como en un plano
+            r_ = _rect_girado(g['cx'], g['cy'], g['lado'] + 1.0, g['giro'])
+            ax.plot(r_[:, 0], r_[:, 1], "--", color=_color_tipo(f['tipo']), lw=1.8, zorder=4)
+        elif f['tipo'].startswith("Antena"):
+            ax.plot(f['x'], f['y'], marker="^", color="#0055ff", ms=11, mec="white", mew=1.0, zorder=6)
+        elif pts is not None:
             ax.plot(pts[:, 0], pts[:, 1], ".", ms=2.2, color=_color_tipo(f['tipo']), zorder=3)
     for _, f in t.iterrows():
         off, ha = (6, 8), "left"
         if f['tipo'].startswith("Antena"):
-            txt, off = f"Antena {f['h_m']:.1f} m", (12, 14)
+            txt, off = f"Antena / estación · {f['h_m']:.1f} m", (12, 14)
         elif "recinto" in f['tipo']:
             txt, off, ha = f"Valla ≈{f['h_m']:.1f} m", (-14, -20), "right"
-        elif f['tipo'].startswith("Vallado"):
+        elif f['tipo'].startswith("Vallado") or f['tipo'].startswith("Sensor"):
             continue
         else:
             txt = f"{int(f['id'])}"
@@ -306,8 +320,12 @@ def detalle_antena(xyz, hag, suelo, est, radio=7.0, titulo="Detalle de la antena
     sc = ax[0].scatter(p[o, 0], p[o, 1], c=h[o], s=1.2, cmap="turbo", vmin=0, vmax=hmax)
     for _, f in t.iterrows():
         pts = est.huellas.get(int(f['id']))
-        if pts is not None and ("recinto" in f['tipo'] or f['tipo'].startswith("Antena")):
-            ax[0].plot(pts[:, 0], pts[:, 1], ".", ms=1.5, color="white", alpha=0.7, zorder=3)
+        g = getattr(est, "geom", {}).get(int(f['id']))
+        if g is not None and g.get("tipo") == "rect":
+            r_ = _rect_girado(g['cx'], g['cy'], g['lado'] + 1.0, g['giro'])
+            ax[0].plot(r_[:, 0], r_[:, 1], "--", color="white", lw=1.8, zorder=4)
+        elif f['tipo'].startswith("Sensor"):
+            ax[0].plot(f['x'], f['y'], "D", ms=5, color="white", mec="#c0392b", zorder=5)
     ax[0].plot([cx], [cy], "k+", ms=12, mew=2, zorder=5)
     ax[0].set_xlim(cx - radio, cx + radio); ax[0].set_ylim(cy - radio, cy + radio); ax[0].set_aspect("equal")
     ax[0].set_title("Planta (color = altura)", fontsize=9)
@@ -316,10 +334,15 @@ def detalle_antena(xyz, hag, suelo, est, radio=7.0, titulo="Detalle de la antena
     for k, (eje, etiq, otro) in enumerate([(0, "Corte E–O (X)", 1), (1, "Corte S–N (Y)", 0)], 1):
         b = np.abs(p[:, otro] - (cy if otro == 1 else cx)) <= 2.5
         ax[k].scatter(p[b, eje], h[b], s=0.8, color="#2e6930", alpha=0.5, lw=0)
-        ax[k].axvline(cx if eje == 0 else cy, color="#b0008f", lw=0.6, ls=":")
+        ax[k].axvline(cx if eje == 0 else cy, color="#0055ff", lw=0.6, ls=":")
         ax[k].annotate(f"Antena {a['h_m']:.1f} m", ((cx if eje == 0 else cy), a['h_m']), xytext=(8, -6),
-                       textcoords="offset points", fontsize=8, color="#b0008f", fontweight="bold")
+                       textcoords="offset points", fontsize=8, color="#0055ff", fontweight="bold")
         for _, f in t.iterrows():
+            if f['tipo'].startswith("Sensor"):
+                ccoord = f['x'] if eje == 0 else f['y']
+                ax[k].plot([ccoord], [f['h_m']], "D", ms=5, color="#c0392b", zorder=5)
+                ax[k].annotate(f"{f['h_m']:.1f} m", (ccoord, f['h_m']), xytext=(5, 2), textcoords="offset points",
+                               fontsize=7, color="#c0392b")
             if "recinto" in f['tipo']:
                 ax[k].axhline(f['h_m'], color="#e67e22", lw=0.8, ls="--")
                 ax[k].annotate(f"valla ≈{f['h_m']:.1f} m", (cx - radio + 0.3 if eje == 0 else cy - radio + 0.3, f['h_m']),
@@ -332,26 +355,66 @@ def detalle_antena(xyz, hag, suelo, est, radio=7.0, titulo="Detalle de la antena
     return a_png(fig)
 
 
-def perfil_vertical(xyz, hag, suelo, p0, p1, ancho=3.0, est=None, titulo="Perfil vertical de la nube de puntos"):
-    """Sección de la nube (como 'Elevation Profile' de QGIS) entre p0 y p1 con una banda de `ancho` m."""
+def perfil_vertical(xyz, hag, suelo, p0, p1, ancho=3.0, est=None, titulo="Perfil vertical de la nube de puntos",
+                    arb=None, modelos=None, modo="tipo"):
+    """Sección de la nube (como 'Elevation Profile' de QGIS) entre p0 y p1 con una banda de `ancho` m.
+    modo='tipo': suelo / vegetación. modo='individuo': cada árbol detectado con un color y su número.
+    modo='especie': sabina / pino. Para individuos/especies hace falta `arb` (resultado del paso 5) y `modelos`."""
     p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
     d = p1 - p0
     L = np.hypot(*d)
+    if L < 0.5:
+        fig, ax = plt.subplots(figsize=(7.6, 3.6))
+        ax.text(0.5, 0.5, "Inicio y fin coinciden: cambia las coordenadas", ha="center")
+        return a_png(fig)
     u = d / L
     v = np.array([-u[1], u[0]])
     rel = xyz[:, :2] - p0
     s, w = rel @ u, rel @ v
     m = (s >= 0) & (s <= L) & (abs(w) <= ancho / 2)
-    fig, ax = plt.subplots(figsize=(7.6, 3.6))
+    fig, ax = plt.subplots(figsize=(7.6, 3.9 if modo != "tipo" else 3.6))
     if m.sum() == 0:
         ax.text(0.5, 0.5, "Sin puntos en el perfil", ha="center")
         return a_png(fig)
-    ss, zz, gg = s[m], xyz[m, 2], suelo[m]
-    if m.sum() > 90000:
-        k = np.random.default_rng(0).choice(m.sum(), 90000, replace=False)
-        ss, zz, gg = ss[k], zz[k], gg[k]
-    ax.scatter(ss[~gg], zz[~gg], s=0.5, color="#2e6930", alpha=0.6, lw=0, label="Vegetación / estructuras")
-    ax.scatter(ss[gg], zz[gg], s=0.5, color="#8b5a2b", alpha=0.8, lw=0, label="Suelo")
+    idx = np.flatnonzero(m)
+    if len(idx) > 90000:
+        idx = np.random.default_rng(0).choice(idx, 90000, replace=False)
+    ss, zz, gg = s[idx], xyz[idx, 2], suelo[idx]
+    lab = np.zeros(len(idx), np.int64)
+    usar_ind = modo in ("individuo", "especie") and arb is not None and modelos is not None and len(arb['tabla'])
+    if usar_ind:
+        x0, y1, nx, ny = modelos['malla_chm']; res = modelos['res_chm']
+        col = np.floor((xyz[idx, 0] - x0) / res).astype(int)
+        fil = np.floor((y1 - xyz[idx, 1]) / res).astype(int)
+        ok = (col >= 0) & (col < nx) & (fil >= 0) & (fil < ny) & (~gg)
+        lab[ok] = arb['labels'][fil[ok], col[ok]]
+    ax.scatter(ss[gg], zz[gg], s=0.5, color="#8b5a2b", alpha=0.8, lw=0, label="Suelo", zorder=1)
+    veg = ~gg
+    if not usar_ind:
+        ax.scatter(ss[veg], zz[veg], s=0.5, color="#2e6930", alpha=0.6, lw=0, label="Vegetación / estructuras", zorder=2)
+    elif modo == "especie":
+        sp = dict(zip(arb['tabla']['id'].astype(int), arb['tabla']['especie']))
+        for nom in ("Sabina", "Pino"):
+            q = veg & np.array([sp.get(int(k), "") == nom for k in lab])
+            if q.any():
+                ax.scatter(ss[q], zz[q], s=0.6, color=COL_ESP[nom], alpha=0.7, lw=0, label=nom, zorder=2)
+        q = veg & (lab == 0)
+        if q.any():
+            ax.scatter(ss[q], zz[q], s=0.5, color="#b9b9b9", alpha=0.5, lw=0, label="Sin individuo asignado", zorder=1)
+    else:
+        q = veg & (lab == 0)
+        if q.any():
+            ax.scatter(ss[q], zz[q], s=0.5, color="#b9b9b9", alpha=0.5, lw=0, label="Sin individuo asignado", zorder=1)
+        paleta = plt.get_cmap("tab20").colors
+        ids = np.unique(lab[veg & (lab > 0)])
+        for k in ids:
+            q = veg & (lab == k)
+            ax.scatter(ss[q], zz[q], s=0.7, color=paleta[int(k) % len(paleta)], alpha=0.8, lw=0, zorder=3)
+            if q.sum() >= 25:
+                j = np.argmax(np.where(q, zz, -np.inf))
+                ax.annotate(f"#{int(k)}", (ss[j], zz[j]), xytext=(0, 3), textcoords="offset points", ha="center",
+                            fontsize=6.5, color="#222", fontweight="bold", zorder=5)
+        ax.scatter([], [], s=0.7, color=paleta[0], label=f"{len(ids)} individuos (cada color = un árbol; #número = id de la tabla)")
     if est is not None and len(est.tabla):
         for _, f in est.tabla.iterrows():
             if f['tipo'].startswith("Antena"):
@@ -363,7 +426,8 @@ def perfil_vertical(xyz, hag, suelo, p0, p1, ancho=3.0, est=None, titulo="Perfil
     ax.set_xlabel("Distancia a lo largo del perfil (m)")
     ax.set_ylabel("Cota (m s.n.m.)")
     ax.set_title(titulo, loc="left")
-    ax.legend(markerscale=12, loc="upper right")
+    ax.legend(markerscale=12, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3, fontsize=7.5, frameon=False)
+    fig.tight_layout()
     return a_png(fig)
 
 
