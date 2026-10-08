@@ -249,6 +249,7 @@ def generar_informe(modelos, datos, roi, estr, arb, comp=None, tablas_est=None, 
     h.append("<h2 class='salto'>8. Infraestructura: antena, vallado y sensores</h2>")
     if te is not None and len(te):
         h.append(_img(fg.plano_estructuras(d['xyz'], ep['hag'], d['suelo'], estr[et], radio=18), "Plano de planta de los elementos detectados alrededor de la antena."))
+        h.append(_img(fg.detalle_antena(d['xyz'], ep['hag'], d['suelo'], estr[et]), "Detalle de la antena y de su recinto: planta ampliada y cortes laterales (E–O y S–N)."))
         h.append(_tabla(te, ['id', 'tipo', 'x', 'y', 'h_m', 'longitud_m', 'confianza', 'excluir', 'notas'],
                         {'x': '{:.2f}', 'y': '{:.2f}', 'h_m': '{:.2f}', 'longitud_m': '{:.1f}'}))
         if ant is not None:

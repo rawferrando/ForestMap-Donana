@@ -49,6 +49,15 @@ class ParamsEstructuras:
     radio_brazos_m: float = 5.0       # brazos / sensores colgados del mástil
     brazos_sobre_m: float = 1.5       # solo cuentan si están ≥ 1,5 m por encima del dosel del entorno
     buffer_mascara_m: float = 0.5
+    # --- recinto cuadrado (valla de poca altura alrededor del mástil)
+    recinto_radio_m: float = 10.0     # zona de búsqueda alrededor de cada mástil
+    recinto_lado_min_m: float = 1.5
+    recinto_lado_max_m: float = 6.0
+    recinto_hag_min_m: float = 0.3
+    recinto_hag_max_m: float = 2.2
+    recinto_cobertura_min: float = 0.60   # fracción del perímetro con puntos
+    recinto_interior_max: float = 0.40    # fracción del interior con puntos (un recinto es hueco)
+    mostrar_dudosos: bool = False         # objetos pequeños sueltos de confianza «baja» (suelen ser arbustos)
 
     def dict(self):
         return asdict(self)
@@ -260,6 +269,103 @@ def _detectar_componentes(x, y, hag, z, mastiles, p, region, log):
     return filas, huellas
 
 
+# ------------------------------------------------------------ recinto cuadrado
+def _detectar_recintos(x, y, z, hag, mastiles, p, log):
+    """Busca un cuadrado hueco (valla/alambrada de ~1–2 m de alto) alrededor de cada mástil.
+
+    Ráster de ocupación a 10 cm de los puntos entre 0,3 y 2,2 m; se compara con una plantilla
+    de «anillo cuadrado» de lado S y giro θ (correlación por FFT). Un recinto tiene el anillo
+    ocupado y el interior casi vacío; una mancha de vegetación llena también el interior.
+    """
+    from scipy.signal import fftconvolve
+    filas, huellas = [], {}
+    g = 0.1
+    for (mx, my) in mastiles:
+        R = p.recinto_radio_m
+        sel = (np.hypot(x - mx, y - my) <= R) & (hag >= p.recinto_hag_min_m) & (hag <= p.recinto_hag_max_m)
+        if sel.sum() < 200:
+            continue
+        px, py, ph = x[sel], y[sel], hag[sel]
+        x0, y0 = mx - R, my - R
+        n = int(2 * R / g) + 1
+        c = np.clip(((px - x0) / g).astype(int), 0, n - 1)
+        r = np.clip(((py - y0) / g).astype(int), 0, n - 1)
+        O = np.zeros((n, n))
+        O[r, c] = 1.0
+        ar = np.arange(n)
+        centro_ok = np.hypot((ar[:, None] - n // 2) * g, (ar[None, :] - n // 2) * g) <= 0.4 * R
+        GX = x0 + (ar[None, :] + 0.5) * g
+        GY = y0 + (ar[:, None] + 0.5) * g
+        mejor = None
+        for S in np.arange(p.recinto_lado_min_m, p.recinto_lado_max_m + 1e-9, 0.25):
+            half = int(np.ceil((S / 2 + 0.8) / g))
+            yy, xx = np.mgrid[-half:half + 1, -half:half + 1] * g
+            for th in range(0, 90, 3):
+                a = np.radians(th)
+                u = np.cos(a) * xx + np.sin(a) * yy
+                v = -np.sin(a) * xx + np.cos(a) * yy
+                q = np.maximum(np.abs(u), np.abs(v))
+                ring = (q >= S / 2 - 0.15) & (q <= S / 2 + 0.15)
+                inn = q < S / 2 - 0.3
+                if ring.sum() == 0 or inn.sum() == 0:
+                    continue
+                cr = fftconvolve(O, (ring / ring.sum())[::-1, ::-1], mode="same")
+                ci = fftconvolve(O, (inn / inn.sum())[::-1, ::-1], mode="same")
+                dxm, dym = mx - GX, my - GY
+                dentro = np.maximum(np.abs(np.cos(a) * dxm + np.sin(a) * dym),
+                                    np.abs(-np.sin(a) * dxm + np.cos(a) * dym)) < S / 2 - 0.1
+                # el recinto de una antena la rodea: si contiene el mástil se prefiere (+0,2)
+                sc = np.where(centro_ok & (ci <= p.recinto_interior_max) & (cr >= p.recinto_cobertura_min),
+                              cr - 0.4 * ci + 0.2 * dentro, -9.0)
+                j = np.unravel_index(np.argmax(sc), sc.shape)
+                if sc[j] > -9 and (mejor is None or sc[j] > mejor[0]):
+                    mejor = (sc[j], S, th, j, float(cr[j]), float(ci[j]))
+        if mejor is None:
+            log.append("Recinto cuadrado: no se encontró ninguna valla cuadrada alrededor del mástil.")
+            continue
+        _, S, th, j, cr, ci = mejor
+        cx, cy = x0 + (j[1] + 0.5) * g, y0 + (j[0] + 0.5) * g
+        a = np.radians(th)
+        # puntos del anillo (para altura y huella)
+        ux = np.cos(a) * (px - cx) + np.sin(a) * (py - cy)
+        uy = -np.sin(a) * (px - cx) + np.cos(a) * (py - cy)
+        q = np.maximum(np.abs(ux), np.abs(uy))
+        en_anillo = (q >= S / 2 - 0.3) & (q <= S / 2 + 0.75)      # muro de ~0,5 m de grosor
+        hh = ph[en_anillo]
+        # altura de la valla: techo continuo (hueco máx. 0,3 m) desde el suelo en cada celda del anillo;
+        # se toma el percentil 90 porque la vegetación adosada y el muestreo bajan el valor típico
+        cel_id = (np.floor(px[en_anillo] / 0.25).astype(np.int64) * 1000003 + np.floor(py[en_anillo] / 0.25).astype(np.int64))
+        techos = []
+        for cid in np.unique(cel_id):
+            col = np.sort(hh[cel_id == cid])
+            if col.min() > 0.8:
+                continue
+            top = 0.3
+            for zq in col:
+                if zq - top <= 0.3:
+                    top = max(top, zq)
+                else:
+                    break
+            techos.append(top)
+        h_valla = float(np.percentile(techos, 90)) if techos else (float(np.percentile(hh, 90)) if len(hh) else 0.0)
+        zz = z[sel][en_anillo]
+        # huella = celdas del anillo (con holgura) -> se excluyen del recuento de árboles
+        cel = np.unique(np.round(np.column_stack([px[en_anillo], py[en_anillo]]) / 0.25) * 0.25, axis=0)
+        conf = "alta" if (cr >= 0.75 and ci <= 0.25) else "media"
+        filas.append(dict(
+            tipo="Vallado / recinto cuadrado", x=float(cx), y=float(cy), h_m=h_valla,
+            cota_m=float(zz.max()) if len(zz) else float('nan'), h_media_m=float(hh.mean()) if len(hh) else 0.0,
+            longitud_m=float(4 * S), area_m2=float(S * S), ancho_m=0.3, n_puntos=int(en_anillo.sum()),
+            confianza=conf, excluir=True,
+            notas=(f"Recinto cuadrado de ≈{S:.1f} m de lado interior (≈{S + 1.0:.1f} m con el muro), giro {th}°, valla de ≈{h_valla:.1f} m; "
+                   f"{100 * cr:.0f} % del perímetro con puntos y {100 * ci:.0f} % del interior ocupado "
+                   f"(rodea el mástil). Altura estimada en la nube: puede incluir vegetación adosada; corríjala si conoce la real." if np.hypot(cx - mx, cy - my) <= S / 2 + 0.3 else
+                   f"Recinto cuadrado de ≈{S:.1f} m de lado interior, giro {th}°, valla de ≈{h_valla:.1f} m.")))
+        huellas[len(filas)] = cel
+        log.append(f"Recinto cuadrado: {S:.1f} × {S:.1f} m en ({cx:.1f}, {cy:.1f}), valla ≈ {h_valla:.1f} m.")
+    return filas, huellas
+
+
 # ------------------------------------------------------------------ principal
 def detectar_estructuras(x, y, z, hag, params=None, region=None, buscar_componentes=True):
     """Detecta mástiles y, alrededor de ellos (o en `region`), vallado e instrumentos.
@@ -278,6 +384,23 @@ def detectar_estructuras(x, y, z, hag, params=None, region=None, buscar_componen
     f_c, h_c = [], {}
     if buscar_componentes:
         f_c, h_c = _detectar_componentes(x, y, hag, z, mast_xy, p, region, log)
+    f_r, h_r = ([], {})
+    if buscar_componentes and mast_xy:
+        f_r, h_r = _detectar_recintos(x, y, z, hag, mast_xy, p, log)
+    if f_r:      # lo que ya es parte del recinto no se vuelve a listar como «instrumento» ni como vallado suelto
+        lado = max(np.sqrt(fr['area_m2']) for fr in f_r)
+        keep = [i for i, fc in enumerate(f_c, 1)
+                if min(np.hypot(fc['x'] - fr['x'], fc['y'] - fr['y']) for fr in f_r) > lado / 2 + 0.8]
+        f_c, h_c = [f_c[i - 1] for i in keep], {k2: h_c[i] for k2, i in enumerate(keep, 1)}
+    if not p.mostrar_dudosos:   # objetos sueltos de confianza «baja»: casi siempre arbustos
+        dud = [i for i, fc in enumerate(f_c, 1) if fc['confianza'] == 'baja']
+        if dud:
+            log.append(f"{len(dud)} objetos pequeños dudosos (probables arbustos) no se muestran; "
+                       "se pueden ver con «mostrar_dudosos».")
+            keep = [i for i in range(1, len(f_c) + 1) if i not in dud]
+            f_c, h_c = [f_c[i - 1] for i in keep], {k2: h_c[i] for k2, i in enumerate(keep, 1)}
+    f_c = f_r + f_c
+    h_c = {**{k: v for k, v in h_r.items()}, **{k + len(f_r): v for k, v in h_c.items()}}
     filas = f_m + f_c
     huellas = {}
     for k, f in enumerate(f_m, 1):

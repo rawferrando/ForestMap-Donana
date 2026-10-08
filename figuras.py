@@ -265,16 +265,70 @@ def plano_estructuras(xyz, hag, suelo, est, radio=22.0, titulo="Infraestructura 
         if pts is not None:
             ax.plot(pts[:, 0], pts[:, 1], ".", ms=2.2, color=_color_tipo(f['tipo']), zorder=3)
     for _, f in t.iterrows():
-        if f['tipo'].startswith("Vallado"):
+        off, ha = (6, 8), "left"
+        if f['tipo'].startswith("Antena"):
+            txt, off = f"Antena {f['h_m']:.1f} m", (12, 14)
+        elif "recinto" in f['tipo']:
+            txt, off, ha = f"Valla ≈{f['h_m']:.1f} m", (-14, -20), "right"
+        elif f['tipo'].startswith("Vallado"):
             continue
-        ax.annotate(f"{int(f['id'])}", (f['x'], f['y']), xytext=(5, 5), textcoords="offset points", fontsize=7,
-                    fontweight="bold", color=_color_tipo(f['tipo']), zorder=5)
+        else:
+            txt = f"{int(f['id'])}"
+        ax.annotate(txt, (f['x'], f['y']), xytext=off, textcoords="offset points", fontsize=8, ha=ha,
+                    fontweight="bold", color=_color_tipo(f['tipo']), zorder=5,
+                    arrowprops=dict(arrowstyle="-", color=_color_tipo(f['tipo']), lw=0.7) if abs(off[0]) > 10 else None,
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.8))
     ax.set_xlim(cx - radio, cx + radio); ax.set_ylim(cy - radio, cy + radio)
     _ejes_mapa(ax, titulo)
     _barra_escala(ax, 5)
-    fig.colorbar(sc, ax=ax, shrink=0.75, pad=0.02).set_label("Altura sobre el suelo (m)", fontsize=8)
+    fig.colorbar(sc, ax=ax, shrink=0.75, pad=0.02).set_label("Altura sobre el suelo (m) — escala limitada; la antena es más alta", fontsize=7)
     ax.legend(handles=[plt.Line2D([], [], marker="o", ls="", color=c, label=k) for k, c in COLOR_TIPO.items()],
               loc="lower right", fontsize=7, frameon=True, framealpha=0.9)
+    return a_png(fig)
+
+
+def detalle_antena(xyz, hag, suelo, est, radio=7.0, titulo="Detalle de la antena y su recinto"):
+    """Planta ampliada + dos cortes laterales (E–O y S–N) para ver el mástil, los brazos y la valla."""
+    t = est.tabla
+    ant = t[t['tipo'].str.startswith("Antena")]
+    if len(ant) == 0:
+        return None
+    a = ant.iloc[0]
+    cx, cy = a['x'], a['y']
+    m = (np.abs(xyz[:, 0] - cx) <= radio) & (np.abs(xyz[:, 1] - cy) <= radio) & ~suelo & (hag > 0.15)
+    p, h = xyz[m], hag[m]
+    if len(p) > 80000:
+        s = np.random.default_rng(0).choice(len(p), 80000, replace=False)
+        p, h = p[s], h[s]
+    hmax = max(float(a['h_m']), 6.0)
+    fig, ax = plt.subplots(1, 3, figsize=(12.5, 4.6), gridspec_kw=dict(width_ratios=[1.1, 1, 1]))
+    o = np.argsort(h)
+    sc = ax[0].scatter(p[o, 0], p[o, 1], c=h[o], s=1.2, cmap="turbo", vmin=0, vmax=hmax)
+    for _, f in t.iterrows():
+        pts = est.huellas.get(int(f['id']))
+        if pts is not None and ("recinto" in f['tipo'] or f['tipo'].startswith("Antena")):
+            ax[0].plot(pts[:, 0], pts[:, 1], ".", ms=1.5, color="white", alpha=0.7, zorder=3)
+    ax[0].plot([cx], [cy], "k+", ms=12, mew=2, zorder=5)
+    ax[0].set_xlim(cx - radio, cx + radio); ax[0].set_ylim(cy - radio, cy + radio); ax[0].set_aspect("equal")
+    ax[0].set_title("Planta (color = altura)", fontsize=9)
+    ax[0].set_xlabel("X UTM (m)", fontsize=8); ax[0].set_ylabel("Y UTM (m)", fontsize=8); ax[0].tick_params(labelsize=7)
+    fig.colorbar(sc, ax=ax[0], shrink=0.8, pad=0.02).set_label("Altura sobre el suelo (m)", fontsize=8)
+    for k, (eje, etiq, otro) in enumerate([(0, "Corte E–O (X)", 1), (1, "Corte S–N (Y)", 0)], 1):
+        b = np.abs(p[:, otro] - (cy if otro == 1 else cx)) <= 2.5
+        ax[k].scatter(p[b, eje], h[b], s=0.8, color="#2e6930", alpha=0.5, lw=0)
+        ax[k].axvline(cx if eje == 0 else cy, color="#b0008f", lw=0.6, ls=":")
+        ax[k].annotate(f"Antena {a['h_m']:.1f} m", ((cx if eje == 0 else cy), a['h_m']), xytext=(8, -6),
+                       textcoords="offset points", fontsize=8, color="#b0008f", fontweight="bold")
+        for _, f in t.iterrows():
+            if "recinto" in f['tipo']:
+                ax[k].axhline(f['h_m'], color="#e67e22", lw=0.8, ls="--")
+                ax[k].annotate(f"valla ≈{f['h_m']:.1f} m", (cx - radio + 0.3 if eje == 0 else cy - radio + 0.3, f['h_m']),
+                               xytext=(0, 4), textcoords="offset points", fontsize=7.5, color="#e67e22", fontweight="bold")
+        ax[k].set_ylim(0, max(float(a['h_m']) + 1, 6)); ax[k].set_xlim((cx if eje == 0 else cy) - radio, (cx if eje == 0 else cy) + radio)
+        ax[k].set_title(etiq + " · banda de 5 m", fontsize=9); ax[k].set_xlabel("Coordenada UTM (m)", fontsize=8)
+        ax[k].set_ylabel("Altura sobre el suelo (m)", fontsize=8); ax[k].tick_params(labelsize=7); ax[k].grid(alpha=0.25)
+    fig.suptitle(titulo, fontsize=10, fontweight="bold")
+    fig.tight_layout()
     return a_png(fig)
 
 
