@@ -55,7 +55,7 @@ def figura_png(b, **kw):
 
 
 with st.sidebar:
-    st.title("🌲 ForestMap Doñana V3")
+    st.title("🌲 ForestMap Doñana")
     TAM = {"Normal": 100, "Grande": 118, "Muy grande": 136, "Enorme": 156}
     tam = st.select_slider("🔠 Tamaño de letra", list(TAM), value="Grande", key="tam_letra",
                            help="Agranda textos, iconos y ayudas (?). Útil para proyectar en una pantalla o una reunión.")
