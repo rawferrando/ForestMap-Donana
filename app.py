@@ -282,11 +282,9 @@ elif paso == PASOS[2]:
         st.plotly_chart(gr.raster_plotly(ep['chm'], mod['malla_chm'], mod['res_chm'], S.roi, "CHM", "Viridis", "m"), use_container_width=True)
     with t4:
         b = S.roi.bounds
-        xm, ym = (b[0] + b[1]) / 2, (b[2] + b[3]) / 2
-        CANONICAS = {"⬌ Este–Oeste": ((b[0], ym), (b[1], ym)), "⬍ Norte–Sur": ((xm, b[3]), (xm, b[2])),
-                     "⬈ Diagonal": ((b[0], b[2]), (b[1], b[3])), "⬊ Diagonal inversa": ((b[0], b[3]), (b[1], b[2]))}
-        if "perf" not in S:
-            S.perf = {"p0": CANONICAS["⬌ Este–Oeste"][0], "p1": CANONICAS["⬌ Este–Oeste"][1], "ultimo": None}
+        ym = (b[2] + b[3]) / 2
+        if "perf" not in S:  # de partida, el mismo corte Este-Oeste por el centro de siempre
+            S.perf = {"p0": (b[0], ym), "p1": (b[1], ym), "ultimo": None}
         S.setdefault("perf_toca", INICIO)
         st.caption("Un perfil es un «corte lateral» del bosque: dibuja los puntos en una banda entre dos extremos, como si lo miraras de lado. **Clica el mapa** para elegirlo (primero el inicio, luego el fin) o escribe las coordenadas a mano.")
 
@@ -304,13 +302,10 @@ elif paso == PASOS[2]:
                 else:
                     S.perf["p1"], S.perf_toca = (px, py), INICIO
 
-        cb = st.columns([2, 1, 1, 1, 1])
-        cb[0].radio("Siguiente click", [INICIO, FIN], key="perf_toca", horizontal=True,
-                    help="Qué extremo moverá el próximo click. Se alterna solo, pero puedes fijarlo para mover solo uno.")
-        for i, (nom, (q0, q1)) in enumerate(CANONICAS.items()):
-            if cb[i + 1].button(nom, use_container_width=True, help="Perfil recto de lado a lado de la parcela."):
-                S.perf.update(p0=q0, p1=q1, ultimo=None)
-                S.perf_toca = INICIO
+        # El radio va con key, así que su estado solo se puede tocar ANTES de esta línea
+        # (Streamlit prohíbe modificar la key de un widget ya instanciado).
+        st.radio("Siguiente click", [INICIO, FIN], key="perf_toca", horizontal=True,
+                 help="Qué extremo moverá el próximo click. Se alterna solo, pero puedes fijarlo para mover solo uno.")
 
         c1, c2, c3, c4, c5 = st.columns(5)
         x0 = c1.number_input("X inicio", value=float(S.perf["p0"][0]), format="%.2f", help="Coordenada X (este) del punto donde empieza el corte."); y0 = c2.number_input("Y inicio", value=float(S.perf["p0"][1]), format="%.2f", help="Coordenada Y (norte) del punto donde empieza el corte.")
