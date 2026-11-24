@@ -50,6 +50,64 @@ def raster_plotly(raster, malla, res, roi, titulo, colorscale="Viridis", unidad=
     return _layout(fig, titulo, ext)
 
 
+def _rejilla_clicks(cx, cy, n_objetivo):
+    """Submuestreo de los centros de celda al que se enganchan los clicks.
+    Devuelve (xx, yy, paso): el paso en celdas marca la precisión al clicar."""
+    # El paso más fino que no pase del objetivo: redondear hacia arriba de golpe
+    # empeora la precisión sin necesidad (2,03 -> 3 son 1,5 m en vez de 1 m).
+    paso = max(1, int(np.sqrt(cx.size * cy.size / max(1, n_objetivo))))
+    while cx[::paso].size * cy[::paso].size > n_objetivo:
+        paso += 1
+    xx, yy = np.meshgrid(cx[::paso], cy[::paso])
+    return xx, yy, paso
+
+
+def mapa_perfil_plotly(raster, malla, res, roi, p0=None, p1=None, ancho=3.0, titulo="CHM", unidad="m",
+                       colorscale="Viridis", n_objetivo=20000):
+    """CHM sobre el que se elige el perfil clicando, con la línea y la banda actuales dibujadas.
+
+    Lleva encima una rejilla de puntos transparentes porque un go.Heatmap **no** emite
+    eventos de selección que Streamlit recoja (comprobado el 2026-11-24): los clicks
+    sobre el heatmap no llegan a Python y sobre un scatter sí. La rejilla es además la
+    que fija la precisión al clicar: `res * paso` metros.
+    """
+    img, cx, cy, ext = _ventana(roi, raster, malla, res)
+    fig = go.Figure(go.Heatmap(z=img, x=cx, y=cy, colorscale=colorscale, colorbar=dict(title=unidad),
+                               hoverinfo="skip"))
+    fig.add_trace(_roi_traza(roi))
+
+    if p0 is not None and p1 is not None:
+        a, b = np.asarray(p0, float), np.asarray(p1, float)
+        d = b - a
+        L = float(np.hypot(*d))
+        if L > 1e-9:
+            u = d / L
+            v = np.array([-u[1], u[0]]) * (ancho / 2.0)
+            esq = np.array([a + v, b + v, b - v, a - v, a + v])
+            fig.add_trace(go.Scatter(x=esq[:, 0], y=esq[:, 1], mode="lines", fill="toself",
+                                     line=dict(color="#ff7f0e", width=1), fillcolor="rgba(255,127,14,0.25)",
+                                     name=f"Banda ({ancho:g} m)", hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=[a[0], b[0]], y=[a[1], b[1]], mode="lines+markers+text",
+                                 line=dict(color="#ff7f0e", width=3),
+                                 marker=dict(size=11, color=["#2ca02c", "#d62728"], line=dict(color="white", width=2)),
+                                 text=["inicio", "fin"], textposition="top center",
+                                 textfont=dict(size=11, color="#333"),
+                                 name=f"Perfil ({L:.1f} m)", hoverinfo="skip"))
+
+    xx, yy, paso = _rejilla_clicks(cx, cy, n_objetivo)
+    z = img[::paso, ::paso]
+    fig.add_trace(go.Scattergl(
+        x=xx.ravel(), y=yy.ravel(), mode="markers",
+        marker=dict(size=max(6, int(np.ceil(6 * paso))), opacity=0.0),
+        customdata=np.where(np.isfinite(z), z, np.nan).ravel(),
+        hovertemplate="X %{x:.1f}<br>Y %{y:.1f}<br>%{customdata:.2f} m<extra></extra>",
+        name="clic", showlegend=False))
+
+    fig = _layout(fig, titulo, ext)
+    fig.update_layout(dragmode=False, clickmode="event+select")
+    return fig, res * paso
+
+
 def capas_plotly(res_arb, modelos, roi, estructuras=None, titulo=None, mostrar_copas=True, mostrar_apices=True):
     cap = res_arb['cap']
     malla, res = modelos['malla_chm'], modelos['res_chm']
