@@ -26,6 +26,7 @@ S = st.session_state
 
 PASOS = ["⚙️ 1 · Configuración", "📂 2 · Carga y parcela", "🗺️ 3 · Modelos digitales", "📡 4 · Antena y estructuras",
          "🌲 5 · Árboles y capas", "🔄 6 · Cambios entre épocas", "📄 7 · Exportar e informe"]
+INICIO, FIN = "🟢 inicio", "🔴 fin"  # extremos del perfil del paso 3
 for k, v in dict(epocas=[], epsg=25829, datos={}, roi=None, modelos=None, estr={}, tab_est={}, arb={}, comp=None,
                  sintetico=False, paquete=None, html=None, autor="", titulo="Sabinar de Doñana", campo_inv=None, campo=None, campo_anio=2011).items():
     S.setdefault(k, v)
@@ -281,11 +282,50 @@ elif paso == PASOS[2]:
         st.plotly_chart(gr.raster_plotly(ep['chm'], mod['malla_chm'], mod['res_chm'], S.roi, "CHM", "Viridis", "m"), use_container_width=True)
     with t4:
         b = S.roi.bounds
+        xm, ym = (b[0] + b[1]) / 2, (b[2] + b[3]) / 2
+        CANONICAS = {"⬌ Este–Oeste": ((b[0], ym), (b[1], ym)), "⬍ Norte–Sur": ((xm, b[3]), (xm, b[2])),
+                     "⬈ Diagonal": ((b[0], b[2]), (b[1], b[3])), "⬊ Diagonal inversa": ((b[0], b[3]), (b[1], b[2]))}
+        if "perf" not in S:
+            S.perf = {"p0": CANONICAS["⬌ Este–Oeste"][0], "p1": CANONICAS["⬌ Este–Oeste"][1], "ultimo": None}
+        S.setdefault("perf_toca", INICIO)
+        st.caption("Un perfil es un «corte lateral» del bosque: dibuja los puntos en una banda entre dos extremos, como si lo miraras de lado. **Clica el mapa** para elegirlo (primero el inicio, luego el fin) o escribe las coordenadas a mano.")
+
+        # La selección del click llega en session_state desde el rerun anterior, así que se
+        # lee ANTES de pintar el mapa: así la línea se dibuja ya con el punto nuevo.
+        clave = f"mapa_perfil_{et}"
+        ev = S.get(clave)
+        pts = (ev.selection.get("points") or []) if ev and getattr(ev, "selection", None) else []
+        if pts:
+            px, py = float(pts[-1]["x"]), float(pts[-1]["y"])
+            if S.perf["ultimo"] != (px, py):  # un mismo rerun no debe reaplicar el click ya usado
+                S.perf["ultimo"] = (px, py)
+                if S.perf_toca == INICIO:
+                    S.perf["p0"], S.perf_toca = (px, py), FIN
+                else:
+                    S.perf["p1"], S.perf_toca = (px, py), INICIO
+
+        cb = st.columns([2, 1, 1, 1, 1])
+        cb[0].radio("Siguiente click", [INICIO, FIN], key="perf_toca", horizontal=True,
+                    help="Qué extremo moverá el próximo click. Se alterna solo, pero puedes fijarlo para mover solo uno.")
+        for i, (nom, (q0, q1)) in enumerate(CANONICAS.items()):
+            if cb[i + 1].button(nom, use_container_width=True, help="Perfil recto de lado a lado de la parcela."):
+                S.perf.update(p0=q0, p1=q1, ultimo=None)
+                S.perf_toca = INICIO
+
         c1, c2, c3, c4, c5 = st.columns(5)
-        st.caption("Un perfil es un «corte lateral» del bosque: dibuja los puntos en una banda entre dos extremos, como si lo miraras de lado.")
-        x0 = c1.number_input("X inicio", value=float(b[0]), help="Coordenada X (este) del punto donde empieza el corte."); y0 = c2.number_input("Y inicio", value=float((b[2] + b[3]) / 2), help="Coordenada Y (norte) del punto donde empieza el corte.")
-        x1 = c3.number_input("X fin", value=float(b[1]), help="Coordenada X del final del corte."); y1 = c4.number_input("Y fin", value=float((b[2] + b[3]) / 2), help="Coordenada Y del final del corte.")
+        x0 = c1.number_input("X inicio", value=float(S.perf["p0"][0]), format="%.2f", help="Coordenada X (este) del punto donde empieza el corte."); y0 = c2.number_input("Y inicio", value=float(S.perf["p0"][1]), format="%.2f", help="Coordenada Y (norte) del punto donde empieza el corte.")
+        x1 = c3.number_input("X fin", value=float(S.perf["p1"][0]), format="%.2f", help="Coordenada X del final del corte."); y1 = c4.number_input("Y fin", value=float(S.perf["p1"][1]), format="%.2f", help="Coordenada Y del final del corte.")
         w = c5.number_input("Ancho banda (m)", 0.5, 20.0, 3.0, help="Grosor de la rebanada: se dibujan los puntos a este ancho a cada lado de la línea. Más ancho = más puntos pero más mezclados.")
+        # Lo escrito a mano manda sobre lo clicado.
+        S.perf["p0"], S.perf["p1"] = (x0, y0), (x1, y1)
+
+        fig_mapa, prec = gr.mapa_perfil_plotly(ep['chm'], mod['malla_chm'], mod['res_chm'], S.roi,
+                                               S.perf["p0"], S.perf["p1"], w,
+                                               titulo=f"CHM — clica el {'inicio 🟢' if S.perf_toca == INICIO else 'fin 🔴'} del perfil")
+        st.plotly_chart(fig_mapa, key=clave, on_select="rerun", selection_mode="points",
+                        use_container_width=True)
+        st.caption(f"Precisión al clicar: ±{prec:g} m (la rejilla de puntos invisible del mapa). "
+                   "Para un perfil exacto, escribe las coordenadas arriba.")
         d = S.datos[et]
         hay_arb = et in S.arb
         modo_txt = st.radio("🎨 Colorear por", ["Suelo / vegetación", "Cada individuo", "Especie"], horizontal=True,
