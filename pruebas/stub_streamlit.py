@@ -53,20 +53,43 @@ for m in ("plotly", "plotly.graph_objects"):
     sys.modules[m] = MagicMock()
 sys.modules["plotly"].graph_objects = sys.modules["plotly.graph_objects"]
 
-import time
+import time, ast
 app = os.path.join(os.path.dirname(__file__), "..", "app.py")
-PASOS = ["1 · Configuración", "2 · Carga y parcela", "3 · Modelos digitales", "4 · Antena y estructuras",
-         "5 · Árboles y capas", "6 · Cambios entre épocas", "7 · Exportar e informe"]
+
+
+def leer_pasos(ruta):
+    """Lee la lista PASOS de app.py sin ejecutarlo."""
+    with open(ruta, encoding="utf-8") as f:
+        arbol = ast.parse(f.read(), filename=ruta)
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "PASOS" for t in nodo.targets):
+            return ast.literal_eval(nodo.value)
+    sys.exit(f"ERROR: no se encuentra la asignación PASOS en {ruta}")
+
+
+os.environ.setdefault("FORESTMAP_DEMO", "1")
+PASOS = leer_pasos(app)
 fallos = 0
-for p in PASOS:
+for i, p in enumerate(PASOS):
     st.paso = p; t = time.time()
     try:
         runpy.run_path(app, run_name="__main__")
         print(f"OK   {p}  ({time.time()-t:.1f}s)")
     except Parar:
-        print(f"STOP {p}  (st.stop — comprobar que es esperado)")
+        if i >= 2:
+            fallos += 1; print(f"FALLA {p}  (st.stop() inesperado: el paso no se ha recorrido)")
+        else:
+            print(f"STOP {p}  (st.stop — esperado en los pasos 1 y 2)")
     except Exception:
         fallos += 1; print(f"FALLA {p}"); traceback.print_exc()
 S = st.session_state
 print("épocas:", list(S.get("arb", {})), "| comp:", S.get("comp") is not None, "| zip KB:", len(S.get("paquete") or b"") // 1024)
+if not S.get("arb"):
+    fallos += 1; print("FALLA: no hay épocas con árboles (S['arb'] vacío o ausente)")
+if S.get("comp") is None:
+    fallos += 1; print("FALLA: no hay comparación entre épocas (S['comp'] es None)")
+if not S.get("paquete"):
+    fallos += 1; print("FALLA: no se ha generado el paquete de exportación (S['paquete'] vacío)")
+if not fallos:
+    print("TODO OK")
 sys.exit(1 if fallos else 0)
